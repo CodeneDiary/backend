@@ -19,14 +19,31 @@ label_map = {
     42: "좌절", 43: "흥미"
 }
 
-def predict_emotion(text: str):
+
+def predict_emotion(text: str, threshold: float = 0.3):
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
     with torch.no_grad():
         outputs = model(**inputs)
-        probs = F.softmax(outputs.logits, dim=-1)
-        top = torch.argmax(probs, dim=-1).item()
-        confidence = probs[0][top].item()
-    return {
-        "label": label_map[top],
-        "confidence": round(confidence, 4)
-    }
+        probs = F.softmax(outputs.logits, dim=-1)[0]  # shape: (num_labels,)
+
+    results = []
+    for i, p in enumerate(probs):
+        if p.item() >= threshold:
+            results.append({
+                "label": label_map[i],
+                "confidence": round(p.item(), 4)
+            })
+
+    # 내림차순 정렬
+    results.sort(key=lambda x: x["confidence"], reverse=True)
+
+    # 아무 감정도 없으면 메시지 반환
+    if not results:
+        return [{
+            "label": "감정을 알 수 없음",
+            "confidence": 0.0
+        }]
+
+    return results
+
+print(predict_emotion("요즘 너무 불안하고 외로워"))
