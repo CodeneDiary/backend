@@ -8,8 +8,14 @@ class Diary(Base):
     __tablename__ = "diaries"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String, default="default_user")  # 추후 로그인 연동 고려
+    user_id = Column(String)  # 이메일로 저장
     content = Column(String)
     emotion = Column(String)
     confidence = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
