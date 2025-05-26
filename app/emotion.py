@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 import torch.nn.functional as F
 
-model_name = "M1NJ1/kobert-emotion"
+model_name = "M1NJ1/Multimodal_Sentiment_Analysis"
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 model = AutoModelForSequenceClassification.from_pretrained(model_name, trust_remote_code=True)
 
