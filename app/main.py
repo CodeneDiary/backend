@@ -7,6 +7,7 @@ from app.emotion import predict_emotion
 from app import model, database
 from app.auth_google import router as google_router
 from app.utils import get_current_user
+from app.chatbot import router as chatbot_router
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
@@ -15,6 +16,7 @@ app = FastAPI()
 model.Base.metadata.create_all(bind=database.engine)
 
 app.include_router(google_router)
+app.include_router(chatbot_router)
 
 # Pydantic 스키마
 class TextInput(BaseModel):
