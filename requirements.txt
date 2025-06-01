@@ -10,3 +10,4 @@ sentencepiece==0.2.0
 protobuf
 httpx
 python-dotenv
+google-cloud-speech
