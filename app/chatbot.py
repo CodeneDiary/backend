@@ -64,6 +64,9 @@ def get_gpt_response(messages):
     )
     return response.choices[0].message.content.strip()
 
+@router.get("/upload/test")
+def upload_test():
+    return {"message": "/upload 라우터가 정상 등록되어 있습니다."}
 
 # /upload 라우터
 @router.post("/upload")
