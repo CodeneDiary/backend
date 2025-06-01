@@ -35,7 +35,7 @@ def build_messages(history, user_input, mode):
     return messages
 
 def get_gpt_response(messages):
-    response = openai.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=messages,
         temperature=0.7,
