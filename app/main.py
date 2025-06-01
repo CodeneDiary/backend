@@ -5,17 +5,15 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.emotion import predict_emotion
 from app import model, database
-from app.auth_google import router as google_router
 from app.chatbot import router as chatbot_router
 from app.utils import get_current_user
+from app.firebase_auth import verify_firebase_token
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
 
 # DB 테이블 생성
 model.Base.metadata.create_all(bind=database.engine)
-
-app.include_router(google_router)
 app.include_router(chatbot_router)
 
 # Pydantic 스키마
@@ -79,5 +77,5 @@ def get_diaries(
 
 
 @app.get("/my-info")
-def my_info(user_email: str = Depends(get_current_user)):
-    return {"message": f"로그인한 사용자: {user_email}"}
+def my_info(user_email: str = Depends(verify_firebase_token)):
+    return {"email": user_email}
