@@ -1,5 +1,12 @@
 fastapi
+uvicorn
 transformers
 torch
-uvicorn
 sqlalchemy
+python-jose[cryptography]
+passlib[bcrypt]
+pydantic
+sentencepiece==0.2.0
+protobuf
+httpx
+python-dotenv
