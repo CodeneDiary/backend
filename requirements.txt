@@ -10,4 +10,6 @@ sentencepiece==0.2.0
 protobuf
 httpx
 python-dotenv
+pydub
+ffmpeg-python
 google-cloud-speech
