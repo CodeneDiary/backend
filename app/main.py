@@ -7,7 +7,7 @@ from app.emotion import predict_emotion
 from app import model, database
 from app.chatbot import router as chatbot_router
 from app.utils import get_current_user
-from app.firebase_auth import verify_firebase_token
+from app.firebase_auth import verify_firebase_token, get_current_user_id
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
@@ -42,14 +42,14 @@ def analyze_emotion(input: TextInput):
 def analyze_and_save(
     input: TextInput,
     db: Session = Depends(get_db),
-    user_email: str = Depends(get_current_user)  # ✅ 로그인한 사용자 정보
+    user_id: str = Depends(get_current_user_id)  # ✅ UID 사용
 ):
     result = predict_emotion(input.text)
 
     diary = model.Diary(
-        user_id=user_email,
+        user_id=user_id,  # UID를 user_id로 저장
         content=input.text,
-        emotion=result[0]["label"],  # 다중 감정이라면 result[0] 기준으로 저장
+        emotion=result[0]["label"],
         confidence=str(result[0]["confidence"])
     )
     db.add(diary)
