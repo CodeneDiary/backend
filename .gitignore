@@ -11,3 +11,5 @@ venv/
 .DS_Store
 
 .env
+
+app/gamja-friend-firebase-adminsdk-fbsvc-34e7a9fe64.json

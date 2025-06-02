@@ -8,7 +8,7 @@ class Diary(Base):
     __tablename__ = "diaries"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String)  # 이메일로 저장
+    user_id = Column(String, index=True)  # Firebase UID
     content = Column(String)
     emotion = Column(String)
     confidence = Column(String)
@@ -17,6 +17,6 @@ class Diary(Base):
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    name = Column(String)
-    hashed_password = Column(String)
+    uid = Column(String, unique=True, index=True)  # Firebase UID
+    email = Column(String, unique=True, index=True)  # 사용자 이메일
+    name = Column(String, nullable=True)  # (선택) 사용자 이름
