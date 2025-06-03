@@ -3,13 +3,12 @@ import firebase_admin
 from firebase_admin import credentials, auth
 from fastapi import Request, HTTPException, Depends, Header
 import os
+import json
 
 # 최초 1회만 초기화
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-cred_path = os.path.join(BASE_DIR, "gamja-friend-firebase-adminsdk-fbsvc-34e7a9fe64.json")
-cred = credentials.Certificate(cred_path)
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+firebase_json = os.getenv("FIREBASE_CREDENTIALS")
+cred = credentials.Certificate(firebase_json)
+firebase_admin.initialize_app(cred)
 
 def verify_firebase_token(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
