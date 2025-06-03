@@ -71,9 +71,9 @@ def analyze_and_save(
 @app.get("/diary/list")
 def get_diaries(
     db: Session = Depends(get_db),
-    user_uid: str = Depends(get_current_user)
+    user_id: str = Depends(get_current_user_id)
 ):
-    return db.query(model.Diary).filter(model.Diary.user_id == user_uid).all()
+    return db.query(model.Diary).filter(model.Diary.user_id == user_id).all()
 
 
 @app.get("/my-info")
