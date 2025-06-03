@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
 import sqlite3
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -19,6 +20,10 @@ AUDIO_DIR = "generated_audio"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 DB_PATH = "./diary.db"
+
+class GenerateQuestionRequest(BaseModel):
+    diary_id: str | None = None
+    diary_text: str | None = None
 
 # m4a에서 flac로 변환
 def convert_m4a_to_flac(input_path):
@@ -99,18 +104,56 @@ def save_chat_log(diary_id, user_input, response):
     conn.close()
 
 # 첫번째 질문 생성
+# @router.post("/generate-question")
+# async def generate_question(request: Request):
+#     body = await request.json()
+#     diary_id = body.get("diary_id")
+
+#     if not diary_id:
+#         return JSONResponse(status_code=400, content={"error": "diary_id is required"})
+
+#     # 일기 내용 불러오기
+#     entry = get_diary_entry(diary_id)
+#     if not entry:
+#         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+
+#     # GPT에게 질문 생성 요청
+#     system_msg = (
+#         "당신은 감정 상담 챗봇입니다. 사용자가 작성한 일기 내용을 바탕으로 감정을 더 잘 파악할 수 있는 첫 질문을 생성하세요. "
+#         "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
+#     )
+#     user_msg = f"일기 내용: {entry}"
+
+#     messages = [
+#         {"role": "system", "content": system_msg},
+#         {"role": "user", "content": user_msg}
+#     ]
+
+#     try:
+#         completion = openai.ChatCompletion.create(
+#             model="gpt-4o-mini",
+#             messages=messages,
+#             temperature=0.7,
+#             max_tokens=200,
+#         )
+#         question = completion.choices[0].message.content.strip()
+#         return {"question": question}
+#     except Exception as e:
+#         print("GPT 에러:", e)
+#         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
 @router.post("/generate-question")
-async def generate_question(request: Request):
-    body = await request.json()
-    diary_id = body.get("diary_id")
+async def generate_question(payload: GenerateQuestionRequest):
+    diary_id = payload.diary_id
+    diary_text = payload.diary_text # 임시 데이터용
 
-    if not diary_id:
-        return JSONResponse(status_code=400, content={"error": "diary_id is required"})
-
-    # 일기 내용 불러오기
-    entry = get_diary_entry(diary_id)
-    if not entry:
-        return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+    if diary_text:
+        entry = diary_text
+    elif diary_id:
+        entry = get_diary_entry(diary_id)
+        if not entry:
+            return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+    else:
+        return JSONResponse(status_code=400, content={"error": "diary_id 또는 diary_text 중 하나는 필요합니다."})
 
     # GPT에게 질문 생성 요청
     system_msg = (
