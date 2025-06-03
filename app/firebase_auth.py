@@ -6,8 +6,9 @@ import os
 import json
 
 # 최초 1회만 초기화
-firebase_json = os.getenv("FIREBASE_CREDENTIALS")
-cred = credentials.Certificate(firebase_json)
+firebase_json_str = os.getenv("FIREBASE_CREDENTIALS")
+firebase_json_dict = json.loads(firebase_json_str)
+cred = credentials.Certificate(firebase_json_dict)
 firebase_admin.initialize_app(cred)
 
 def verify_firebase_token(request: Request) -> str:
