@@ -20,7 +20,7 @@ def verify_firebase_token(request: Request) -> str:
 
     try:
         decoded_token = auth.verify_id_token(id_token)
-        return decoded_token["email"]  # 또는 uid
+        return decoded_token["uid"]
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token")
 
