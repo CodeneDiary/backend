@@ -1,6 +1,6 @@
 # app/main.py
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.emotion import predict_emotion
@@ -8,6 +8,7 @@ from app import model, database
 from app.chatbot import router as chatbot_router
 from app.utils import get_current_user
 from app.firebase_auth import verify_firebase_token, get_current_user_id
+from datetime import datetime
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
@@ -41,32 +42,39 @@ def analyze_emotion(input: TextInput):
 # 감정 분석 + DB 저장
 @app.post("/diary/text")
 def analyze_and_save(
-    input: TextInput,
-    db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)  # ✅ UID 사용
+        input: TextInput,
+        db: Session = Depends(get_db),
+        user_id: str = Depends(get_current_user_id)
 ):
-    result = predict_emotion(input.text)
+    try:
+        result = predict_emotion(input.text)
 
-    diary = model.Diary(
-        user_id=user_id,  # UID를 user_id로 저장
-        content=input.text,
-        emotion=result[0]["label"],
-        confidence=str(result[0]["confidence"]),
-        date=input.date
-    )
-    db.add(diary)
-    db.commit()
-    db.refresh(diary)
+        parsed_date = datetime.strptime(input.date, "%Y-%m-%d").date()
 
-    return {
-        "message": "저장 완료!",
-        "diary": {
-            "id": diary.id,
-            "content": diary.content,
-            "emotion": diary.emotion,
-            "confidence": diary.confidence
+        diary = model.Diary(
+            user_id=user_id,
+            content=input.text,
+            emotion=result[0]["label"],
+            confidence=str(result[0]["confidence"]),
+            date=parsed_date
+        )
+        db.add(diary)
+        db.commit()
+        db.refresh(diary)
+
+        return {
+            "message": "저장 완료!",
+            "diary": {
+                "id": diary.id,
+                "content": diary.content,
+                "emotion": diary.emotion,
+                "confidence": diary.confidence,
+                "date": diary.date
+            }
         }
-    }
+    except Exception as e:
+        print("🔥 서버 오류:", e)
+        raise HTTPException(status_code=500, detail="서버 내부 오류")
 
 
 # 일기 목록 반환
