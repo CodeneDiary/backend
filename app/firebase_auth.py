@@ -3,13 +3,13 @@ import firebase_admin
 from firebase_admin import credentials, auth
 from fastapi import Request, HTTPException, Depends, Header
 import os
+import json
 
 # 최초 1회만 초기화
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-cred_path = os.path.join(BASE_DIR, "gamja-friend-firebase-adminsdk-fbsvc-34e7a9fe64.json")
-cred = credentials.Certificate(cred_path)
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+firebase_json_str = os.getenv("FIREBASE_CREDENTIALS")
+firebase_json_dict = json.loads(firebase_json_str)
+cred = credentials.Certificate(firebase_json_dict)
+firebase_admin.initialize_app(cred)
 
 def verify_firebase_token(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
@@ -20,7 +20,7 @@ def verify_firebase_token(request: Request) -> str:
 
     try:
         decoded_token = auth.verify_id_token(id_token)
-        return decoded_token["email"]  # 또는 uid
+        return decoded_token["uid"]
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token")
 

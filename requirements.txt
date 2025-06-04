@@ -13,6 +13,7 @@ python-dotenv
 pydub
 ffmpeg-python
 google-cloud-speech
+google-cloud-texttospeech
 firebase-admin
 python-multipart
 openai

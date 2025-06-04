@@ -1,13 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, UploadFile, File, Form, Request
+from fastapi.responses import FileResponse, JSONResponse
 import openai, os, tempfile, json, uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
+import sqlite3
+from pydantic import BaseModel
 
 router = APIRouter()
 
-# 환경 변수 로드
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
@@ -18,14 +19,29 @@ if GOOGLE_STT_KEY_PATH:
 AUDIO_DIR = "generated_audio"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# m4a → flac 변환
+DB_PATH = "./diary.db"
+
+class GenerateQuestionRequest(BaseModel):
+    diary_id: str | None = None
+    diary_text: str | None = None
+
+# m4a에서 flac로 변환
 def convert_m4a_to_flac(input_path):
     sound = AudioSegment.from_file(input_path, format="m4a")
     flac_path = input_path.replace(".m4a", ".flac")
     sound.export(flac_path, format="flac")
     return flac_path
 
-# 감정 모드 판단 함수
+# diary entry 가져오기
+def get_diary_entry(diary_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT content FROM diaries WHERE id=?", (diary_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+# T/F 모드
 def detect_mode(user_input, prev_mode="F"):
     user_input = user_input.lower()
     if any(k in user_input for k in ["이성적으로", "논리적으로", "냉정하게"]):
@@ -34,17 +50,19 @@ def detect_mode(user_input, prev_mode="F"):
         return "F"
     return prev_mode
 
-# GPT 메시지 구성 함수
+# GPT 메세지
 def build_messages(history, user_input, mode):
-    messages = [{
-        "role": "system",
-        "content": (
-            "당신은 감정 상담을 해주는 따뜻한 챗봇입니다. "
-            "사용자의 감정을 이해하고 요청한 스타일에 따라 답변해야 합니다. "
-            "T: 이성적 조언 / F: 감성적 공감. "
-            "무조건 부드러운 어조를 유지하세요."
-        )
-    }]
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "당신은 감정 상담을 해주는 따뜻한 챗봇입니다. "
+                "사용자의 감정을 이해하고 요청한 스타일에 따라 답변해야 합니다. "
+                "T: 이성적 조언 / F: 감성적 공감. "
+                "무조건 부드러운 어조를 유지하세요."
+            )
+        }
+    ]
     for turn in history:
         messages.append({"role": "user", "content": turn["user_input"]})
         messages.append({"role": "assistant", "content": turn["response"]})
@@ -52,7 +70,7 @@ def build_messages(history, user_input, mode):
     messages.append({"role": "user", "content": prompt})
     return messages
 
-# GPT 응답 생성
+# 답변 생성
 def get_gpt_response(messages):
     response = openai.ChatCompletion.create(
         model="gpt-4o-mini",
@@ -62,7 +80,7 @@ def get_gpt_response(messages):
     )
     return response.choices[0].message.content.strip()
 
-# Google TTS 음성 생성 함수
+# TTS
 def synthesize_speech(text, output_path):
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text)
@@ -71,18 +89,104 @@ def synthesize_speech(text, output_path):
         ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
     )
     audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
-    response = client.synthesize_speech(
-        input=synthesis_input, voice=voice, audio_config=audio_config
-    )
+    response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
     with open(output_path, "wb") as out:
         out.write(response.audio_content)
     return output_path
 
-# /upload 라우터
+# 대화내역 저장
+def save_chat_log(diary_id, user_input, response):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO chat_logs (diary_id, user_input, response) VALUES (?, ?, ?)",
+                   (diary_id, user_input, response))
+    conn.commit()
+    conn.close()
+
+# 첫번째 질문 생성
+# @router.post("/generate-question")
+# async def generate_question(request: Request):
+#     body = await request.json()
+#     diary_id = body.get("diary_id")
+
+#     if not diary_id:
+#         return JSONResponse(status_code=400, content={"error": "diary_id is required"})
+
+#     # 일기 내용 불러오기
+#     entry = get_diary_entry(diary_id)
+#     if not entry:
+#         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+
+#     # GPT에게 질문 생성 요청
+#     system_msg = (
+#         "당신은 감정 상담 챗봇입니다. 사용자가 작성한 일기 내용을 바탕으로 감정을 더 잘 파악할 수 있는 첫 질문을 생성하세요. "
+#         "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
+#     )
+#     user_msg = f"일기 내용: {entry}"
+
+#     messages = [
+#         {"role": "system", "content": system_msg},
+#         {"role": "user", "content": user_msg}
+#     ]
+
+#     try:
+#         completion = openai.ChatCompletion.create(
+#             model="gpt-4o-mini",
+#             messages=messages,
+#             temperature=0.7,
+#             max_tokens=200,
+#         )
+#         question = completion.choices[0].message.content.strip()
+#         return {"question": question}
+#     except Exception as e:
+#         print("GPT 에러:", e)
+#         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
+@router.post("/generate-question")
+async def generate_question(payload: GenerateQuestionRequest):
+    diary_id = payload.diary_id
+    diary_text = payload.diary_text # 임시 데이터용
+
+    if diary_text:
+        entry = diary_text
+    elif diary_id:
+        entry = get_diary_entry(diary_id)
+        if not entry:
+            return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+    else:
+        return JSONResponse(status_code=400, content={"error": "diary_id 또는 diary_text 중 하나는 필요합니다."})
+
+    # GPT에게 질문 생성 요청
+    system_msg = (
+        "당신은 감정 상담 챗봇입니다. 사용자가 작성한 일기 내용을 바탕으로 감정을 더 잘 파악할 수 있는 첫 질문을 생성하세요. "
+        "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
+    )
+    user_msg = f"일기 내용: {entry}"
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg}
+    ]
+
+    try:
+        completion = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=200,
+        )
+        question = completion.choices[0].message.content.strip()
+        return {"question": question}
+    except Exception as e:
+        print("GPT 에러:", e)
+        return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
+
+
+# 오디오 업로드 & 답변
 @router.post("/upload")
 async def upload_audio(
     file: UploadFile = File(...),
-    history: str = Form(default="[]")
+    history: str = Form(...),
+    diary_id: str = Form(...),
 ):
     history_data = json.loads(history)
 
@@ -92,7 +196,6 @@ async def upload_audio(
 
     flac_path = convert_m4a_to_flac(m4a_path)
 
-    # STT
     client = speech.SpeechClient()
     with open(flac_path, "rb") as audio_file:
         content = audio_file.read()
@@ -115,16 +218,28 @@ async def upload_audio(
     output_path = os.path.join(AUDIO_DIR, filename)
     synthesize_speech(response_text, output_path)
 
+    save_chat_log(diary_id, user_input, response_text)
+
     return {
         "input": user_input,
         "response": response_text,
         "audio_url": f"/audio/{filename}"
     }
 
-# 음성 파일 제공
+# 오디오
 @router.get("/audio/{filename}")
 async def get_audio(filename: str):
     path = os.path.join(AUDIO_DIR, filename)
     if os.path.exists(path):
         return FileResponse(path, media_type="audio/mpeg")
     return {"error": "파일이 존재하지 않습니다."}
+
+# 대화내역
+@router.get("/chat-history")
+async def get_chat_history(diary_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_input, response FROM chat_logs WHERE diary_id=?", (diary_id,))
+    logs = cursor.fetchall()
+    conn.close()
+    return {"logs": [{"user_input": u, "response": r} for u, r in logs]}

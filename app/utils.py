@@ -43,9 +43,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
+        uid = payload.get("sub")  # ✅ 여기서 uid 가져옴
+        if uid is None:
             raise credentials_exception
-        return email
+        return uid
     except JWTError:
         raise credentials_exception
