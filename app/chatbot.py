@@ -4,6 +4,11 @@ import openai, os, tempfile, json, uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
+from app.model import Diary  # SQLAlchemy Diary 모델
+from app.database import get_db  # 세션 의존성
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
 from datetime import datetime
 
 router = APIRouter()
@@ -101,11 +106,21 @@ def save_chat_log(diary_id, user_input, response):
         json.dump(log, f, ensure_ascii=False, indent=2)
 
 @router.get("/diary/text/{diary_id}")
-async def get_diary_text(diary_id: str):
-    entry = get_diary_entry(diary_id)
-    if not entry:
+async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
+    diary = db.query(Diary).filter(Diary.id == diary_id).first()
+
+    if not diary:
         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
-    return {"text": entry}
+
+    return {
+        "text": {
+            "id": diary.id,
+            "content": diary.content,
+            "emotion": diary.emotion,
+            "confidence": diary.confidence,
+            "date": diary.date
+        }
+    }
 
 @router.post("/generate-question")
 async def generate_question(request: Request):
