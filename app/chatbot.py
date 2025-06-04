@@ -1,14 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
 import openai, os, tempfile, json, uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
-import sqlite3
+from datetime import datetime
 
 router = APIRouter()
 
-# 환경 변수 로드
+# 환경 변수
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
@@ -16,8 +16,9 @@ if GOOGLE_STT_KEY_PATH:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
 
 AUDIO_DIR = "generated_audio"
+LOG_DIR = "chat_logs"
 os.makedirs(AUDIO_DIR, exist_ok=True)
-
+os.makedirs(LOG_DIR, exist_ok=True)
 
 # m4a → flac 변환
 def convert_m4a_to_flac(input_path):
@@ -26,7 +27,15 @@ def convert_m4a_to_flac(input_path):
     sound.export(flac_path, format="flac")
     return flac_path
 
-# 대화 스타일 감지 (T/F)
+# 테스트용 일기 텍스트 반환 (실제 DB 없이)
+def get_diary_entry(diary_id):
+    dummy_diaries = {
+        "1": "오늘은 친구랑 다퉈서 기분이 안 좋았다.",
+        "2": "날씨가 좋아서 산책을 했고 기분이 상쾌했다."
+    }
+    return dummy_diaries.get(diary_id, "")
+
+# 대화 스타일 판별
 def detect_mode(user_input, prev_mode="F"):
     user_input = user_input.lower()
     if any(k in user_input for k in ["이성적으로", "논리적으로", "냉정하게"]):
@@ -35,7 +44,7 @@ def detect_mode(user_input, prev_mode="F"):
         return "F"
     return prev_mode
 
-# GPT 메시지 빌드
+# GPT 메시지 구성
 def build_messages(history, user_input, mode):
     messages = [
         {
@@ -58,15 +67,15 @@ def build_messages(history, user_input, mode):
 # GPT 응답 생성
 def get_gpt_response(messages):
     client = openai.OpenAI()
-    response= client.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
         temperature=0.7,
         max_tokens=300,
-        )
+    )
     return response.choices[0].message.content.strip()
 
-# TTS
+# TTS 변환
 def synthesize_speech(text, output_path):
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text)
@@ -80,12 +89,33 @@ def synthesize_speech(text, output_path):
         out.write(response.audio_content)
     return output_path
 
+# 파일 기반 대화 기록 저장
+def save_chat_log(diary_id, user_input, response):
+    log_path = os.path.join(LOG_DIR, f"{diary_id}.json")
+    log = []
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as f:
+            log = json.load(f)
+    log.append({"user_input": user_input, "response": response})
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
 
-# 첫 질문 생성 (임시 텍스트 기반)
+@router.get("/diary/text/{diary_id}")
+async def get_diary_text(diary_id: str):
+    entry = get_diary_entry(diary_id)
+    if not entry:
+        return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+    return {"text": entry}
+
 @router.post("/generate-question")
-async def generate_question():
-    diary_text = "오늘 하루 너무 재밌었어."
-
+async def generate_question(request: Request):
+    body = await request.json()
+    diary_id = body.get("diary_id")
+    if not diary_id:
+        return JSONResponse(status_code=400, content={"error": "diary_id is required"})
+    entry = get_diary_entry(diary_id)
+    if not entry:
+        return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
     messages = [
         {
             "role": "system",
@@ -94,9 +124,8 @@ async def generate_question():
                 "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
             )
         },
-        {"role": "user", "content": f"일기 내용: {diary_text}"}
+        {"role": "user", "content": f"일기 내용: {entry}"}
     ]
-
     try:
         client = openai.OpenAI()
         completion = client.chat.completions.create(
@@ -104,27 +133,24 @@ async def generate_question():
         messages=messages,
         temperature=0.7,
         max_tokens=300,
-        )
+    )
         question = completion.choices[0].message.content.strip()
         return {"question": question}
     except Exception as e:
         print("GPT 에러:", e)
         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
 
-# 음성 업로드 → STT → GPT → TTS
 @router.post("/upload")
 async def upload_audio(
     file: UploadFile = File(...),
-    history: str = Form(...)
+    history: str = Form(...),
+    diary_id: str = Form(...),
 ):
     history_data = json.loads(history)
-
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp:
         tmp.write(await file.read())
         m4a_path = tmp.name
-
     flac_path = convert_m4a_to_flac(m4a_path)
-
     client = speech.SpeechClient()
     with open(flac_path, "rb") as audio_file:
         content = audio_file.read()
@@ -136,29 +162,31 @@ async def upload_audio(
     )
     stt_result = client.recognize(config=config, audio=audio)
     user_input = " ".join([r.alternatives[0].transcript for r in stt_result.results])
-
     prev_mode = history_data[-1].get("mode", "F") if history_data else "F"
     mode = detect_mode(user_input, prev_mode)
-
     messages = build_messages(history_data, user_input, mode)
     response_text = get_gpt_response(messages)
-
     filename = f"{uuid.uuid4()}.mp3"
     output_path = os.path.join(AUDIO_DIR, filename)
     synthesize_speech(response_text, output_path)
-
+    save_chat_log(diary_id, user_input, response_text)
     return {
         "input": user_input,
         "response": response_text,
-        "mode": mode,
         "audio_url": f"/audio/{filename}"
     }
 
-
-# 음성 파일 제공
 @router.get("/audio/{filename}")
 async def get_audio(filename: str):
     path = os.path.join(AUDIO_DIR, filename)
     if os.path.exists(path):
         return FileResponse(path, media_type="audio/mpeg")
-    return JSONResponse(status_code=404, content={"error": "파일이 존재하지 않습니다."})
+    return {"error": "파일이 존재하지 않습니다."}
+
+@router.get("/chat-history")
+async def get_chat_history(diary_id: str):
+    path = os.path.join(LOG_DIR, f"{diary_id}.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return {"logs": json.load(f)}
+    return {"logs": []}
