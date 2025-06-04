@@ -16,3 +16,5 @@ google-cloud-speech
 firebase-admin
 python-multipart
 openai
+google-api-python-client
+
