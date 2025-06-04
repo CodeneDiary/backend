@@ -19,6 +19,7 @@ app.include_router(chatbot_router)
 # Pydantic 스키마
 class TextInput(BaseModel):
     text: str
+    date: str
 
 
 # DB 세션 연결 함수
@@ -50,7 +51,8 @@ def analyze_and_save(
         user_id=user_id,  # UID를 user_id로 저장
         content=input.text,
         emotion=result[0]["label"],
-        confidence=str(result[0]["confidence"])
+        confidence=str(result[0]["confidence"]),
+        date=input.date
     )
     db.add(diary)
     db.commit()

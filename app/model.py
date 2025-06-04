@@ -1,6 +1,6 @@
 # app/models.py
 
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Date
 from datetime import datetime
 from app.database import Base
 
@@ -12,6 +12,7 @@ class Diary(Base):
     content = Column(String)
     emotion = Column(String)
     confidence = Column(String)
+    date = Column(Date)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class User(Base):
