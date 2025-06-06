@@ -127,7 +127,9 @@ async def generate_question(
         if not diary_id:
             return JSONResponse(status_code=400, content={"error": "diary_id is required"})
 
-        diary = db.query(Diary).filter(Diary.id == diary_id).first()
+        #diary = db.query(Diary).filter(Diary.id == diary_id).first()
+        diary = db.query(Diary).filter(Diary.id == int(diary_id)).first()
+
         if not diary:
             return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
 
