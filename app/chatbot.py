@@ -1,15 +1,17 @@
-from fastapi import APIRouter, UploadFile, File, Form, Request
+from fastapi import APIRouter, UploadFile, File, Form, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
-import openai, os, tempfile, json, uuid
+from sqlalchemy.orm import Session
+from datetime import datetime
+import openai
+import os
+import tempfile
+import json
+import uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
 from app.model import Diary  # SQLAlchemy Diary 모델
-from app.database import get_db  # 세션 의존성
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-
-from datetime import datetime
+from app.main import get_db  # 세션 의존성
 
 router = APIRouter()
 
@@ -31,14 +33,6 @@ def convert_m4a_to_flac(input_path):
     flac_path = input_path.replace(".m4a", ".flac")
     sound.export(flac_path, format="flac")
     return flac_path
-
-# 테스트용 일기 텍스트 반환 (실제 DB 없이)
-def get_diary_entry(diary_id):
-    dummy_diaries = {
-        "1": "오늘은 친구랑 다퉈서 기분이 안 좋았다.",
-        "2": "날씨가 좋아서 산책을 했고 기분이 상쾌했다."
-    }
-    return dummy_diaries.get(diary_id, "")
 
 # 대화 스타일 판별
 def detect_mode(user_input, prev_mode="F"):
@@ -94,7 +88,7 @@ def synthesize_speech(text, output_path):
         out.write(response.audio_content)
     return output_path
 
-# 파일 기반 대화 기록 저장
+# 대화 기록 저장
 def save_chat_log(diary_id, user_input, response):
     log_path = os.path.join(LOG_DIR, f"{diary_id}.json")
     log = []
@@ -105,13 +99,12 @@ def save_chat_log(diary_id, user_input, response):
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
 
+# DB에서 일기 내용 조회 API
 @router.get("/diary/text/{diary_id}")
 async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
     diary = db.query(Diary).filter(Diary.id == diary_id).first()
-
     if not diary:
         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
-
     return {
         "text": {
             "id": diary.id,
@@ -122,53 +115,66 @@ async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
         }
     }
 
+# 첫 질문 생성 API – DB에서 diary_id로 일기 조회
 @router.post("/generate-question")
-async def generate_question(request: Request):
-    body = await request.json()
-    diary_id = body.get("diary_id")
-    if not diary_id:
-        return JSONResponse(status_code=400, content={"error": "diary_id is required"})
-    entry = get_diary_entry(diary_id)
-    if not entry:
-        return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "당신은 감정 상담 챗봇입니다. 사용자가 작성한 일기 내용을 바탕으로 감정을 더 잘 파악할 수 있는 첫 질문을 생성하세요. "
-                "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
-            )
-        },
-        {"role": "user", "content": f"일기 내용: {entry}"}
-    ]
+async def generate_question(
+    request: Request,
+    db: Session = Depends(get_db)
+):
     try:
+        body = await request.json()
+        diary_id = body.get("diary_id")
+        if not diary_id:
+            return JSONResponse(status_code=400, content={"error": "diary_id is required"})
+
+        diary = db.query(Diary).filter(Diary.id == diary_id).first()
+        if not diary:
+            return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+
+        diary_content = diary.content
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "당신은 감정 상담 챗봇입니다. 사용자가 작성한 일기 내용을 바탕으로 감정을 더 잘 파악할 수 있는 첫 질문을 생성하세요. "
+                    "질문은 너무 길지 않게 하고, 감정을 유도하는 부드러운 문장으로 시작하세요."
+                )
+            },
+            {"role": "user", "content": f"일기 내용: {diary_content}"}
+        ]
+
         client = openai.OpenAI()
         completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.7,
-        max_tokens=300,
-    )
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=300,
+        )
         question = completion.choices[0].message.content.strip()
         return {"question": question}
+
     except Exception as e:
-        print("GPT 에러:", e)
+        print("질문 생성 실패:", e)
         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
 
+# 음성 업로드 및 대화 처리
 @router.post("/upload")
 async def upload_audio(
     file: UploadFile = File(...),
     history: str = Form(...),
-    diary_id: str = Form(...),
+    diary_id: str = Form(...)
 ):
     history_data = json.loads(history)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp:
         tmp.write(await file.read())
         m4a_path = tmp.name
+
     flac_path = convert_m4a_to_flac(m4a_path)
     client = speech.SpeechClient()
     with open(flac_path, "rb") as audio_file:
         content = audio_file.read()
+
     audio = speech.RecognitionAudio(content=content)
     config = speech.RecognitionConfig(
         encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
@@ -177,20 +183,25 @@ async def upload_audio(
     )
     stt_result = client.recognize(config=config, audio=audio)
     user_input = " ".join([r.alternatives[0].transcript for r in stt_result.results])
+
     prev_mode = history_data[-1].get("mode", "F") if history_data else "F"
     mode = detect_mode(user_input, prev_mode)
+
     messages = build_messages(history_data, user_input, mode)
     response_text = get_gpt_response(messages)
+
     filename = f"{uuid.uuid4()}.mp3"
     output_path = os.path.join(AUDIO_DIR, filename)
     synthesize_speech(response_text, output_path)
     save_chat_log(diary_id, user_input, response_text)
+
     return {
         "input": user_input,
         "response": response_text,
         "audio_url": f"/audio/{filename}"
     }
 
+# 오디오 파일 반환
 @router.get("/audio/{filename}")
 async def get_audio(filename: str):
     path = os.path.join(AUDIO_DIR, filename)
@@ -198,6 +209,7 @@ async def get_audio(filename: str):
         return FileResponse(path, media_type="audio/mpeg")
     return {"error": "파일이 존재하지 않습니다."}
 
+# 대화 기록 반환
 @router.get("/chat-history")
 async def get_chat_history(diary_id: str):
     path = os.path.join(LOG_DIR, f"{diary_id}.json")
