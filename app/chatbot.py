@@ -10,8 +10,8 @@ import uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
-from app.model import Diary  # SQLAlchemy Diary 모델
-from app.main import get_db  # 세션 의존성
+from app.model import Diary, ConversationLog  #  ConversationLog 모델 추가
+from app.main import get_db
 
 router = APIRouter()
 
@@ -23,18 +23,16 @@ if GOOGLE_STT_KEY_PATH:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
 
 AUDIO_DIR = "generated_audio"
-LOG_DIR = "chat_logs"
 os.makedirs(AUDIO_DIR, exist_ok=True)
-os.makedirs(LOG_DIR, exist_ok=True)
 
-# m4a → flac 변환
+# 음성 → FLAC
 def convert_m4a_to_flac(input_path):
     sound = AudioSegment.from_file(input_path, format="m4a")
     flac_path = input_path.replace(".m4a", ".flac")
     sound.export(flac_path, format="flac")
     return flac_path
 
-# 대화 스타일 판별
+# 감정/이성 모드 감지
 def detect_mode(user_input, prev_mode="F"):
     user_input = user_input.lower()
     if any(k in user_input for k in ["이성적으로", "논리적으로", "냉정하게"]):
@@ -43,7 +41,7 @@ def detect_mode(user_input, prev_mode="F"):
         return "F"
     return prev_mode
 
-# GPT 메시지 구성
+# GPT 메시지 생성
 def build_messages(history, user_input, mode):
     messages = [
         {
@@ -88,18 +86,19 @@ def synthesize_speech(text, output_path):
         out.write(response.audio_content)
     return output_path
 
-# 대화 기록 저장
-def save_chat_log(diary_id, user_input, response):
-    log_path = os.path.join(LOG_DIR, f"{diary_id}.json")
-    log = []
-    if os.path.exists(log_path):
-        with open(log_path, "r", encoding="utf-8") as f:
-            log = json.load(f)
-    log.append({"user_input": user_input, "response": response})
-    with open(log_path, "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=2)
+#  DB에 대화 저장
+def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str, mode: str, audio_url: str = None):
+    log = ConversationLog(
+        diary_id=diary_id,
+        user_input=user_input,
+        response=response,
+        mode=mode,
+        audio_url=audio_url
+    )
+    db.add(log)
+    db.commit()
 
-# DB에서 일기 내용 조회 API
+# 일기 텍스트 조회
 @router.get("/diary/text/{diary_id}")
 async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
     diary = db.query(Diary).filter(Diary.id == diary_id).first()
@@ -115,26 +114,20 @@ async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
         }
     }
 
-# 첫 질문 생성 API – DB에서 diary_id로 일기 조회
+# 첫 질문 생성
 @router.post("/generate-question")
-async def generate_question(
-    request: Request,
-    db: Session = Depends(get_db)
-):
+async def generate_question(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
         diary_id = body.get("diary_id")
         if not diary_id:
             return JSONResponse(status_code=400, content={"error": "diary_id is required"})
 
-        #diary = db.query(Diary).filter(Diary.id == diary_id).first()
         diary = db.query(Diary).filter(Diary.id == int(diary_id)).first()
-
         if not diary:
             return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
 
         diary_content = diary.content
-
         messages = [
             {
                 "role": "system",
@@ -165,7 +158,8 @@ async def generate_question(
 async def upload_audio(
     file: UploadFile = File(...),
     history: str = Form(...),
-    diary_id: str = Form(...)
+    diary_id: str = Form(...),
+    db: Session = Depends(get_db)
 ):
     history_data = json.loads(history)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp:
@@ -195,7 +189,15 @@ async def upload_audio(
     filename = f"{uuid.uuid4()}.mp3"
     output_path = os.path.join(AUDIO_DIR, filename)
     synthesize_speech(response_text, output_path)
-    save_chat_log(diary_id, user_input, response_text)
+
+    save_chat_log_db(
+        db=db,
+        diary_id=int(diary_id),
+        user_input=user_input,
+        response=response_text,
+        mode=mode,
+        audio_url=f"/audio/{filename}"
+    )
 
     return {
         "input": user_input,
@@ -211,11 +213,24 @@ async def get_audio(filename: str):
         return FileResponse(path, media_type="audio/mpeg")
     return {"error": "파일이 존재하지 않습니다."}
 
-# 대화 기록 반환
+# 대화 기록 조회 (DB 기반)
 @router.get("/chat-history")
-async def get_chat_history(diary_id: str):
-    path = os.path.join(LOG_DIR, f"{diary_id}.json")
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return {"logs": json.load(f)}
-    return {"logs": []}
+async def get_chat_history(diary_id: int, db: Session = Depends(get_db)):
+    logs = (
+        db.query(ConversationLog)
+        .filter(ConversationLog.diary_id == diary_id)
+        .order_by(ConversationLog.created_at)
+        .all()
+    )
+
+    result = [
+        {
+            "user_input": log.user_input,
+            "response": log.response,
+            "mode": log.mode,
+            "audio_url": log.audio_url,
+            "created_at": log.created_at.isoformat()
+        }
+        for log in logs
+    ]
+    return {"logs": result}
