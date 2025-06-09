@@ -121,6 +121,7 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
         diary_id = body.get("diary_id")
+
         if not diary_id:
             return JSONResponse(status_code=400, content={"error": "diary_id is required"})
 
@@ -129,6 +130,8 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
 
         diary_content = diary.content
+        #print("📖 일기 내용:", diary_content)
+
         messages = [
             {
                 "role": "system",
@@ -140,20 +143,29 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             {"role": "user", "content": f"일기 내용: {diary_content}"}
         ]
 
-        client = openai.OpenAI()
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=300,
-        )
-        question = completion.choices[0].message.content.strip()
+        try:
+            client = openai.OpenAI()
+            completion = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=300,
+            )
+            question = completion.choices[0].message.content.strip()
+            #print("🧠 생성된 질문:", question)
+        except Exception as gpt_error:
+            #print("❌ GPT 응답 실패:", gpt_error)
+            return JSONResponse(status_code=500, content={"error": "GPT 응답 실패"})
 
         # TTS로 변환
-        filename = f"{uuid.uuid4()}.mp3"
-        output_path = os.path.join(AUDIO_DIR, filename)
-        synthesize_speech(question, output_path)
-        audio_url = f"/audio/{filename}"
+        try:
+            filename = f"{uuid.uuid4()}.mp3"
+            output_path = os.path.join(AUDIO_DIR, filename)
+            synthesize_speech(question, output_path)
+            audio_url = f"/audio/{filename}"
+        except Exception as tts_error:
+            #print("❌ TTS 변환 실패:", tts_error)
+            return JSONResponse(status_code=500, content={"error": "TTS 변환 실패"})
 
         return {
             "question": question,
@@ -161,8 +173,9 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        print("질문 생성 실패:", e)
+        #print("❌ 최상위 에러:", e)
         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
+
 
 
 # 음성 업로드 및 대화 처리
