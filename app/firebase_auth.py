@@ -8,7 +8,7 @@ import json
 # Firebase 인증 초기화 (환경변수에 파일 경로가 들어 있음)
 firebase_path = os.path.join(os.path.dirname(__file__), os.getenv("FIREBASE_CREDENTIALS"))
 if not firebase_path:
-    raise RuntimeError("FIREBASE_CREDENTIALS 환경변수가 비어 있습니다")
+    raise RuntimeError("FIREBASE_CREDENTIALS 환경변수가 비어 있습니다.")
 
 with open(firebase_path, "r") as f:
     firebase_json_dict = json.load(f)
