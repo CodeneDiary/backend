@@ -25,14 +25,14 @@ if GOOGLE_STT_KEY_PATH:
 AUDIO_DIR = "generated_audio"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# 음성 → FLAC
+# STT 처리를 위해 m4a → flac 파일 변환
 def convert_m4a_to_flac(input_path):
     sound = AudioSegment.from_file(input_path, format="m4a")
     flac_path = input_path.replace(".m4a", ".flac")
     sound.export(flac_path, format="flac")
     return flac_path
 
-# 감정/이성 모드 감지
+# 사용자 입력에 특정 키워드가 포함되어 있으면 감정 모드(T/F)를 판단
 def detect_mode(user_input, prev_mode="F"):
     user_input = user_input.lower()
     if any(k in user_input for k in ["이성적으로", "논리적으로", "냉정하게"]):
@@ -61,7 +61,7 @@ def build_messages(history, user_input, mode):
     messages.append({"role": "user", "content": prompt})
     return messages
 
-# GPT 응답 생성
+# 챗봇 응답 생성
 def get_gpt_response(messages):
     client = openai.OpenAI()
     response = client.chat.completions.create(
@@ -72,7 +72,7 @@ def get_gpt_response(messages):
     )
     return response.choices[0].message.content.strip()
 
-# TTS 변환
+# Google TTS API를 활용해 GPT 응답 텍스트를 mp3 음성으로 변환
 def synthesize_speech(text, output_path):
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text)
@@ -86,7 +86,7 @@ def synthesize_speech(text, output_path):
         out.write(response.audio_content)
     return output_path
 
-#  DB에 대화 저장
+# 대화 내역을 ConversationLog 테이블에 저장
 def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str, mode: str, audio_url: str = None):
     log = ConversationLog(
         diary_id=diary_id,
@@ -99,22 +99,22 @@ def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str,
     db.commit()
 
 # 일기 텍스트 조회
-@router.get("/diary/text/{diary_id}")
-async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
-    diary = db.query(Diary).filter(Diary.id == diary_id).first()
-    if not diary:
-        return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
-    return {
-        "text": {
-            "id": diary.id,
-            "content": diary.content,
-            "emotion": diary.emotion,
-            "confidence": diary.confidence,
-            "date": diary.date
-        }
-    }
+# @router.get("/diary/text/{diary_id}")
+# async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
+#     diary = db.query(Diary).filter(Diary.id == diary_id).first()
+#     if not diary:
+#         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
+#     return {
+#         "text": {
+#             "id": diary.id,
+#             "content": diary.content,
+#             "emotion": diary.emotion,
+#             "confidence": diary.confidence,
+#             "date": diary.date
+#         }
+#     }
 
-# 첫 질문 생성
+# 프론트에서 diary_id를 전달하면 해당 일기 내용을 기반으로 첫 질문 생성 후 질문 TTS 변환 후 오디오 저장
 @router.post("/generate-question")
 async def generate_question(request: Request, db: Session = Depends(get_db)):
     try:
@@ -147,11 +147,22 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             max_tokens=300,
         )
         question = completion.choices[0].message.content.strip()
-        return {"question": question}
+
+        # TTS로 변환
+        filename = f"{uuid.uuid4()}.mp3"
+        output_path = os.path.join(AUDIO_DIR, filename)
+        synthesize_speech(question, output_path)
+        audio_url = f"/audio/{filename}"
+
+        return {
+            "question": question,
+            "audio_url": audio_url
+        }
 
     except Exception as e:
         print("질문 생성 실패:", e)
         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
+
 
 # 음성 업로드 및 대화 처리
 @router.post("/upload")
