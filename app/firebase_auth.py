@@ -1,12 +1,12 @@
 # app/firebase_auth.py
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials, auth, initialize_app
 from fastapi import Request, HTTPException, Depends, Header
 import os
 import json
 
 # Firebase 인증 초기화 (환경변수에 파일 경로가 들어 있음)
-firebase_path = os.getenv("FIREBASE_CREDENTIALS")
+firebase_path = os.path.join(os.path.dirname(__file__), os.getenv("FIREBASE_CREDENTIALS"))
 if not firebase_path:
     raise RuntimeError("FIREBASE_CREDENTIALS 환경변수가 비어 있습니다")
 

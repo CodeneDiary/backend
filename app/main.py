@@ -14,7 +14,8 @@ from app.deps import get_db
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=env_path)
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
