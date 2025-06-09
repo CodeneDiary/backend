@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
 from app.model import Diary, ConversationLog  #  ConversationLog 모델 추가
-from app.main import get_db
+#from app.main import get_db
+from app.deps import get_db
 
 router = APIRouter()
 

@@ -9,6 +9,7 @@ from app.chatbot import router as chatbot_router
 from app.utils import get_current_user
 from app.firebase_auth import verify_firebase_token, get_current_user_id
 from datetime import datetime
+from app.deps import get_db
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
@@ -23,13 +24,13 @@ class TextInput(BaseModel):
     date: str
 
 
-# DB 세션 연결 함수
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# # DB 세션 연결 함수
+# def get_db():
+#     db = database.SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
 
 
 # 기존 감정 분석만 반환하는 API (기존 코드 유지!)
