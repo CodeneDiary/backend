@@ -13,6 +13,7 @@ from pydub import AudioSegment
 from app.model import Diary, ConversationLog  #  ConversationLog 모델 추가
 #from app.main import get_db
 from app.deps import get_db
+import base64
 
 router = APIRouter()
 
@@ -23,8 +24,8 @@ GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
 if GOOGLE_STT_KEY_PATH:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
 
-AUDIO_DIR = "generated_audio"
-os.makedirs(AUDIO_DIR, exist_ok=True)
+# AUDIO_DIR = "generated_audio"
+# os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # STT 처리를 위해 m4a → flac 파일 변환
 def convert_m4a_to_flac(input_path):
@@ -74,7 +75,7 @@ def get_gpt_response(messages):
     return response.choices[0].message.content.strip()
 
 # Google TTS API를 활용해 GPT 응답 텍스트를 mp3 음성으로 변환
-def synthesize_speech(text, output_path):
+def synthesize_speech_base64(text: str) -> str:
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
@@ -83,9 +84,10 @@ def synthesize_speech(text, output_path):
     )
     audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
     response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
-    with open(output_path, "wb") as out:
-        out.write(response.audio_content)
-    return output_path
+
+    # base64 인코딩
+    audio_base64 = base64.b64encode(response.audio_content).decode("utf-8")
+    return audio_base64
 
 # 대화 내역을 ConversationLog 테이블에 저장
 def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str, mode: str, audio_url: str = None):
@@ -159,17 +161,16 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
 
         # TTS로 변환
         try:
-            filename = f"{uuid.uuid4()}.mp3"
-            output_path = os.path.join(AUDIO_DIR, filename)
-            synthesize_speech(question, output_path)
-            audio_url = f"/audio/{filename}"
+            # TTS → base64
+            audio_base64 = synthesize_speech_base64(question)
+
         except Exception as tts_error:
             #print("❌ TTS 변환 실패:", tts_error)
-            return JSONResponse(status_code=500, content={"error": "TTS 변환 실패"})
+            return JSONResponse(status_code=500, content={"error": "TTS 변환 실패~"})
 
         return {
             "question": question,
-            "audio_url": audio_url
+            "audio_base64": audio_base64
         }
 
     except Exception as e:
@@ -211,32 +212,33 @@ async def upload_audio(
     messages = build_messages(history_data, user_input, mode)
     response_text = get_gpt_response(messages)
 
-    filename = f"{uuid.uuid4()}.mp3"
-    output_path = os.path.join(AUDIO_DIR, filename)
-    synthesize_speech(response_text, output_path)
+    # TTS → base64
+    audio_base64 = synthesize_speech_base64(response_text)
 
+    # DB 저장
     save_chat_log_db(
         db=db,
         diary_id=int(diary_id),
         user_input=user_input,
         response=response_text,
         mode=mode,
-        audio_url=f"/audio/{filename}"
+        #audio_url=None  # URL 저장 안 함
     )
 
     return {
         "input": user_input,
         "response": response_text,
-        "audio_url": f"/audio/{filename}"
+        "audio_base64": audio_base64
     }
 
-# 오디오 파일 반환
-@router.get("/audio/{filename}")
-async def get_audio(filename: str):
-    path = os.path.join(AUDIO_DIR, filename)
-    if os.path.exists(path):
-        return FileResponse(path, media_type="audio/mpeg")
-    return {"error": "파일이 존재하지 않습니다."}
+
+# # 오디오 파일 반환
+# @router.get("/audio/{filename}")
+# async def get_audio(filename: str):
+#     path = os.path.join(AUDIO_DIR, filename)
+#     if os.path.exists(path):
+#         return FileResponse(path, media_type="audio/mpeg")
+#     return {"error": "파일이 존재하지 않습니다."}
 
 # 대화 기록 조회 (DB 기반)
 @router.get("/chat-history")
@@ -253,7 +255,7 @@ async def get_chat_history(diary_id: int, db: Session = Depends(get_db)):
             "user_input": log.user_input,
             "response": log.response,
             "mode": log.mode,
-            "audio_url": log.audio_url,
+            #"audio_url": log.audio_url,
             "created_at": log.created_at.isoformat()
         }
         for log in logs
