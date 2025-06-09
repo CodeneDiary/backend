@@ -1,15 +1,20 @@
 # app/main.py
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.emotion import predict_emotion
-from app import model, database
+from app import model, database, recommender
 from app.chatbot import router as chatbot_router
+from app.recommender import get_recommendations
 from app.utils import get_current_user
 from app.firebase_auth import verify_firebase_token, get_current_user_id
 from datetime import datetime
 from app.deps import get_db
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # FastAPI 앱 객체 생성
 app = FastAPI()
@@ -17,6 +22,10 @@ app = FastAPI()
 # DB 테이블 생성
 model.Base.metadata.create_all(bind=database.engine)
 app.include_router(chatbot_router)
+app.include_router(recommender.router, prefix="/api")
+
+# 추천용 DB 경로
+RECOMMEND_DB_PATH = os.path.join("data", "emotion.db")
 
 # Pydantic 스키마
 class TextInput(BaseModel):
@@ -90,3 +99,24 @@ def get_diaries(
 @app.get("/my-info")
 def my_info(user_email: str = Depends(verify_firebase_token)):
     return {"email": user_email}
+
+@app.post("/recommend/from-text")
+def recommend_from_text(
+    text: str = Query(..., description="사용자 입력 텍스트"),
+    content_type: str = Query(..., description="books | movies | music | quotes")
+):
+    try:
+        # 1. 감정 분석
+        emotions = predict_emotion(text)
+        top_emotion = emotions[0]["label"]  # confidence 가장 높은 감정 사용
+
+        # 2. 감정 기반 추천
+        results = get_recommendations(content_type, top_emotion, RECOMMEND_DB_PATH)
+
+        return {
+            "emotion": top_emotion,
+            "results": results
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
