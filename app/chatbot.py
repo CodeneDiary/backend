@@ -80,9 +80,9 @@ def get_gpt_response(messages):
 
 def synthesize_speech_base64(text: str) -> str:
     try:
-        #직접 경로 지정
-        GOOGLE_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH", "./leafy-computing-460314-v0-c752836719ce.json")
-        credentials = service_account.Credentials.from_service_account_file(GOOGLE_KEY_PATH)
+        google_key_json = os.getenv("GOOGLE_STT_KEY")
+        key_dict = json.loads(google_key_json)
+        credentials = service_account.Credentials.from_service_account_info(key_dict)
 
         client = texttospeech.TextToSpeechClient(credentials=credentials)
 
