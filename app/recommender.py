@@ -7,16 +7,27 @@ router = APIRouter()
 
 def get_recommendations(content_type, emotion, db_path):
     """emotion.db에서 콘텐츠 종류와 감정 기반 추천 항목 반환"""
+    """emotion이 있을 경우 감정 기반 추천, 없으면 인기(무작위) 추천"""
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    query = f"""
-    SELECT title, url
-    FROM {content_type}
-    WHERE emotion_tags LIKE ?
-    LIMIT 5;
-    """
-    cursor.execute(query, (f"%{emotion}%",))
+    if emotion:
+        query = f"""
+            SELECT title, url
+            FROM {content_type}
+            WHERE emotion_tags LIKE ?
+            LIMIT 5;
+            """
+        cursor.execute(query, (f"%{emotion}%",))
+    else:
+        query = f"""
+            SELECT title, url
+            FROM {content_type}
+            ORDER BY RANDOM()
+            LIMIT 5;
+            """
+        cursor.execute(query)
+
     results = cursor.fetchall()
     conn.close()
 
@@ -24,12 +35,16 @@ def get_recommendations(content_type, emotion, db_path):
 
 # 추천 API 엔드포인트
 @router.get("/recommend")
-def recommend(
-    content_type: str = Query(..., description="books | movies | music | quotes"),
+def recommend_all(
     emotion: str = Query(..., description="감정 키워드 (예: 우울, 설렘 등)")
 ):
     try:
-        results = get_recommendations(content_type, emotion, DB_PATH)
-        return {"results": results}
+        return {
+            "emotion": emotion or "default",
+            "books": get_recommendations("books", emotion, DB_PATH),
+            "movies": get_recommendations("movies", emotion, DB_PATH),
+            "music": get_recommendations("music", emotion, DB_PATH),
+            "quotes": get_recommendations("quotes", emotion, DB_PATH)
+        }
     except Exception as e:
         return {"error": str(e)}

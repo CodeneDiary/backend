@@ -45,5 +45,3 @@ def predict_emotion(text: str, threshold: float = 0.3):
         }]
 
     return results
-
-print(predict_emotion("요즘 너무 불안하고 외로워"))
