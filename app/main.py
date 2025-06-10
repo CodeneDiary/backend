@@ -101,22 +101,17 @@ def get_diaries(
 def my_info(user_email: str = Depends(verify_firebase_token)):
     return {"email": user_email}
 
-@app.post("/recommend/from-text")
-def recommend_from_text(
-    text: str = Query(..., description="사용자 입력 텍스트"),
-    content_type: str = Query(..., description="books | movies | music | quotes")
+@app.post("/recommend/from-emotion")
+def recommend_from_emotion(
+    emotion: str = Query(..., description="기반 감정 (예: 행복, 슬픔 등)")
 ):
     try:
-        # 1. 감정 분석
-        emotions = predict_emotion(text)
-        top_emotion = emotions[0]["label"]  # confidence 가장 높은 감정 사용
-
-        # 2. 감정 기반 추천
-        results = get_recommendations(content_type, top_emotion, RECOMMEND_DB_PATH)
-
         return {
-            "emotion": top_emotion,
-            "results": results
+            "emotion": emotion,
+            "books": get_recommendations("books", emotion, RECOMMEND_DB_PATH),
+            "movies": get_recommendations("movies", emotion, RECOMMEND_DB_PATH),
+            "music": get_recommendations("music", emotion, RECOMMEND_DB_PATH),
+            "quotes": get_recommendations("quotes", emotion, RECOMMEND_DB_PATH)
         }
 
     except Exception as e:
