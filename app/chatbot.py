@@ -203,49 +203,57 @@ async def upload_audio(
     diary_id: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    history_data = json.loads(history)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp:
-        tmp.write(await file.read())
-        m4a_path = tmp.name
+    try:
+        history_data = json.loads(history)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp:
+            tmp.write(await file.read())
+            m4a_path = tmp.name
 
-    flac_path = convert_m4a_to_flac(m4a_path)
-    client = speech.SpeechClient()
-    with open(flac_path, "rb") as audio_file:
-        content = audio_file.read()
+        flac_path = convert_m4a_to_flac(m4a_path)
 
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
-        sample_rate_hertz=16000,
-        language_code="ko-KR"
-    )
-    stt_result = client.recognize(config=config, audio=audio)
-    user_input = " ".join([r.alternatives[0].transcript for r in stt_result.results])
+        client = speech.SpeechClient()
+        with open(flac_path, "rb") as audio_file:
+            content = audio_file.read()
 
-    prev_mode = history_data[-1].get("mode", "F") if history_data else "F"
-    mode = detect_mode(user_input, prev_mode)
+        audio = speech.RecognitionAudio(content=content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
+            sample_rate_hertz=16000,
+            language_code="ko-KR"
+        )
+        stt_result = client.recognize(config=config, audio=audio)
 
-    messages = build_messages(history_data, user_input, mode)
-    response_text = get_gpt_response(messages)
+        if not stt_result.results:
+            raise ValueError("STT 결과가 없습니다.")
 
-    # TTS → base64
-    audio_base64 = synthesize_speech_base64(response_text)
+        user_input = " ".join([r.alternatives[0].transcript for r in stt_result.results])
 
-    # DB 저장
-    save_chat_log_db(
-        db=db,
-        diary_id=int(diary_id),
-        user_input=user_input,
-        response=response_text,
-        mode=mode,
-        #audio_url=None  # URL 저장 안 함
-    )
+        prev_mode = history_data[-1].get("mode", "F") if history_data else "F"
+        mode = detect_mode(user_input, prev_mode)
 
-    return {
-        "input": user_input,
-        "response": response_text,
-        "audio_base64": audio_base64
-    }
+        messages = build_messages(history_data, user_input, mode)
+        response_text = get_gpt_response(messages)
+        audio_base64 = synthesize_speech_base64(response_text)
+
+        save_chat_log_db(
+            db=db,
+            diary_id=int(diary_id),
+            user_input=user_input,
+            response=response_text,
+            mode=mode,
+        )
+
+        return {
+            "input": user_input,
+            "response": response_text,
+            "audio_base64": audio_base64
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()  # 서버 콘솔에 전체 오류 로그 출력
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 
 # # 오디오 파일 반환
