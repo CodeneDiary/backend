@@ -181,6 +181,14 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             # TTS → base64
             audio_base64 = synthesize_speech_base64(question)
 
+            save_chat_log_db(
+                db=db,
+                diary_id=int(diary_id),
+                user_input=diary_content,  # 첫 질문엔 사용자 일기
+                response=question,
+                mode="F" 
+            )
+
         except Exception as tts_error:
             #print("❌ TTS 변환 실패:", tts_error)
             return JSONResponse(status_code=500, content={"error": "TTS 변환 실패~"})
