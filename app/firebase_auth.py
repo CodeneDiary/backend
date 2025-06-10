@@ -6,18 +6,13 @@ import os
 import json
 
 # Firebase 인증 초기화 (환경변수에 파일 경로가 들어 있음)
-firebase_path = os.path.join(os.path.dirname(__file__), os.getenv("FIREBASE_CREDENTIALS"))
-if not firebase_path:
-    raise RuntimeError("FIREBASE_CREDENTIALS 환경변수가 비어 있습니다.")
+# JSON 문자열을 읽어 dict로 파싱
+firebase_cred_str = os.getenv("FIREBASE_CREDENTIALS")
+firebase_cred_dict = json.loads(firebase_cred_str)
 
-with open(firebase_path, "r") as f:
-    firebase_json_dict = json.load(f)
-
-cred = credentials.Certificate(firebase_json_dict)
-
-# 중복 초기화 방지
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+# Firebase 초기화
+cred = credentials.Certificate(firebase_cred_dict)
+initialize_app(cred)
 
 
 # 요청에서 Firebase 토큰을 꺼내 UID 반환
