@@ -31,6 +31,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # STT 처리를 위해 m4a → flac 파일 변환
 def convert_m4a_to_flac(input_path):
     sound = AudioSegment.from_file(input_path, format="m4a")
+    sound = sound.set_channels(2)
     flac_path = input_path.replace(".m4a", ".flac")
     sound.export(flac_path, format="flac")
     return flac_path
@@ -247,6 +248,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
                 encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
                 #sample_rate_hertz=16000,
                 language_code="ko-KR",
+                audio_channel_count=2
             )
             stt_result = client.recognize(config=config, audio=audio)
 
