@@ -233,7 +233,12 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
 
         # 5. STT
         try:
-            client = speech.SpeechClient()
+            google_key_json = os.getenv("GOOGLE_STT_KEY")
+            key_dict = json.loads(google_key_json)
+            credentials = service_account.Credentials.from_service_account_info(key_dict)
+
+            client = speech.SpeechClient(credentials=credentials)
+            #client = speech.SpeechClient()
             with open(flac_path, "rb") as audio_file:
                 content = audio_file.read()
 
