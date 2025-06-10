@@ -245,7 +245,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
             audio = speech.RecognitionAudio(content=content)
             config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
-                sample_rate_hertz=16000,
+                #sample_rate_hertz=16000,
                 language_code="ko-KR",
             )
             stt_result = client.recognize(config=config, audio=audio)
