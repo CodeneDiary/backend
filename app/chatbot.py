@@ -14,15 +14,16 @@ from app.model import Diary, ConversationLog  #  ConversationLog 모델 추가
 #from app.main import get_db
 from app.deps import get_db
 import base64
+from google.oauth2 import service_account
 
 router = APIRouter()
 
 # 환경 변수
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
-GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
-if GOOGLE_STT_KEY_PATH:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
+# GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
+# if GOOGLE_STT_KEY_PATH:
+#     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
 
 # AUDIO_DIR = "generated_audio"
 # os.makedirs(AUDIO_DIR, exist_ok=True)
@@ -75,19 +76,35 @@ def get_gpt_response(messages):
     return response.choices[0].message.content.strip()
 
 # Google TTS API를 활용해 GPT 응답 텍스트를 mp3 음성으로 변환
-def synthesize_speech_base64(text: str) -> str:
-    client = texttospeech.TextToSpeechClient()
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="ko-KR",
-        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-    )
-    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
-    response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
 
-    # base64 인코딩
-    audio_base64 = base64.b64encode(response.audio_content).decode("utf-8")
-    return audio_base64
+
+def synthesize_speech_base64(text: str) -> str:
+    try:
+        #직접 경로 지정
+        credentials = service_account.Credentials.from_service_account_file(
+            "./leafy-computing-460314-v0-c752836719ce.json"
+        )
+
+        client = texttospeech.TextToSpeechClient(credentials=credentials)
+
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="ko-KR",
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+        )
+        audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+
+        response = client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+
+        audio_base64 = base64.b64encode(response.audio_content).decode("utf-8")
+        return audio_base64
+
+    except Exception as e:
+        print("❌ TTS 변환 오류:", e)
+        raise RuntimeError(f"TTS 변환 실패: {str(e)}")
+
 
 # 대화 내역을 ConversationLog 테이블에 저장
 def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str, mode: str, audio_url: str = None):
