@@ -10,8 +10,7 @@ import uuid
 from dotenv import load_dotenv
 from google.cloud import speech, texttospeech
 from pydub import AudioSegment
-from app.model import Diary, ConversationLog  #  ConversationLog 모델 추가
-#from app.main import get_db
+from app.model import Diary, ConversationLog
 from app.deps import get_db
 import base64
 from google.oauth2 import service_account
@@ -21,12 +20,6 @@ router = APIRouter()
 # 환경 변수
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
-# GOOGLE_STT_KEY_PATH = os.getenv("GOOGLE_STT_KEY_PATH")
-# if GOOGLE_STT_KEY_PATH:
-#     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_STT_KEY_PATH
-
-# AUDIO_DIR = "generated_audio"
-# os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # STT 처리를 위해 m4a → flac 파일 변환
 def convert_m4a_to_flac(input_path):
@@ -36,33 +29,49 @@ def convert_m4a_to_flac(input_path):
     sound.export(flac_path, format="flac")
     return flac_path
 
-# 사용자 입력에 특정 키워드가 포함되어 있으면 감정 모드(T/F)를 판단
-def detect_mode(user_input, prev_mode="F"):
-    user_input = user_input.lower()
-    if any(k in user_input for k in ["이성적으로", "논리적으로", "냉정하게"]):
-        return "T"
-    elif any(k in user_input for k in ["공감", "감성적으로", "위로"]):
-        return "F"
-    return prev_mode
-
-# GPT 메시지 생성
-def build_messages(history, user_input, mode):
+def detect_mode(user_input: str) -> str:
     messages = [
         {
             "role": "system",
             "content": (
-                "당신은 감정 상담을 해주는 따뜻한 챗봇입니다. "
-                "사용자의 감정을 이해하고 요청한 스타일에 따라 답변해야 합니다. "
-                "T: 이성적 조언 / F: 감성적 공감. "
-                "무조건 부드러운 어조를 유지하세요."
+                "당신은 상담 챗봇의 모드 분류기입니다.\n"
+                "사용자의 말에서 이성적 조언을 원하는지(T), 감정적 공감을 원하는지(F)를 판단하세요.\n"
+                "결과는 반드시 T 또는 F로만 대답하세요.\n\n"
+                "- 분석, 판단, 객관적인 조언을 원하면: T\n"
+                "- 위로, 공감, 감정 표현을 원하면: F"
             )
-        }
+        },
+        {"role": "user", "content": f"사용자 발화: {user_input}"}
     ]
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0
+    )
+    result = response.choices[0].message.content.strip()
+    return result if result in ["T", "F"] else "F"
+
+# GPT 메시지 생성
+def build_messages(history, user_input, mode):
+    if mode == "T":
+        system_prompt = (
+            "당신은 논리적으로 조언하는 이성적 상담 챗봇입니다.\n"
+            "현실적인 해결책을 중심으로 1~2문장 이내로 명확하게 답변하세요.\n"
+            "감정보다는 판단과 분석에 집중하세요."
+        )
+    else:
+        system_prompt = (
+            "당신은 따뜻하게 공감해주는 감성 상담 챗봇입니다.\n"
+            "위로와 격려를 1~2문장 이내로 부드럽게 전달하세요.\n"
+            "이해와 공감을 중심으로 이야기하세요."
+        )
+
+    messages = [{"role": "system", "content": system_prompt}]
     for turn in history:
         messages.append({"role": "user", "content": turn["user_input"]})
         messages.append({"role": "assistant", "content": turn["response"]})
-    prompt = f"[요청 스타일: {mode}]\n{user_input}"
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": user_input})
     return messages
 
 # 챗봇 응답 생성
@@ -77,32 +86,26 @@ def get_gpt_response(messages):
     return response.choices[0].message.content.strip()
 
 # Google TTS API를 활용해 GPT 응답 텍스트를 mp3 음성으로 변환
-
-
-def synthesize_speech_base64(text: str) -> str:
+def synthesize_speech_base64(text: str, mode: str = "F") -> str:
     try:
         google_key_json = os.getenv("GOOGLE_STT_KEY")
         key_dict = json.loads(google_key_json)
         credentials = service_account.Credentials.from_service_account_info(key_dict)
-
         client = texttospeech.TextToSpeechClient(credentials=credentials)
-
         synthesis_input = texttospeech.SynthesisInput(text=text)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code="ko-KR",
-            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-        )
-        audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
 
-        response = client.synthesize_speech(
-            input=synthesis_input, voice=voice, audio_config=audio_config
-        )
+        if mode == "T":
+            voice = texttospeech.VoiceSelectionParams(language_code="ko-KR", ssml_gender=texttospeech.SsmlVoiceGender.FEMALE)
+            audio_config = texttospeech.AudioConfig(speaking_rate=1.0, pitch=-2.0, audio_encoding=texttospeech.AudioEncoding.MP3)
+        else:
+            voice = texttospeech.VoiceSelectionParams(language_code="ko-KR", ssml_gender=texttospeech.SsmlVoiceGender.FEMALE)
+            audio_config = texttospeech.AudioConfig(speaking_rate=1.05, pitch=2.0, audio_encoding=texttospeech.AudioEncoding.MP3)
 
-        audio_base64 = base64.b64encode(response.audio_content).decode("utf-8")
-        return audio_base64
+        response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+        return base64.b64encode(response.audio_content).decode("utf-8")
 
     except Exception as e:
-        print("❌ TTS 변환 오류:", e)
+        print("TTS 변환 오류:", e)
         raise RuntimeError(f"TTS 변환 실패: {str(e)}")
 
 
@@ -117,22 +120,6 @@ def save_chat_log_db(db: Session, diary_id: int, user_input: str, response: str,
     )
     db.add(log)
     db.commit()
-
-# 일기 텍스트 조회
-# @router.get("/diary/text/{diary_id}")
-# async def get_diary_text(diary_id: int, db: Session = Depends(get_db)):
-#     diary = db.query(Diary).filter(Diary.id == diary_id).first()
-#     if not diary:
-#         return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
-#     return {
-#         "text": {
-#             "id": diary.id,
-#             "content": diary.content,
-#             "emotion": diary.emotion,
-#             "confidence": diary.confidence,
-#             "date": diary.date
-#         }
-#     }
 
 # 프론트에서 diary_id를 전달하면 해당 일기 내용을 기반으로 첫 질문 생성 후 질문 TTS 변환 후 오디오 저장
 @router.post("/generate-question")
@@ -149,7 +136,6 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             return JSONResponse(status_code=404, content={"error": "일기 내용을 찾을 수 없습니다."})
 
         diary_content = diary.content
-        #print("📖 일기 내용:", diary_content)
 
         messages = [
             {
@@ -171,9 +157,7 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
                 max_tokens=300,
             )
             question = completion.choices[0].message.content.strip()
-            #print("🧠 생성된 질문:", question)
         except Exception as gpt_error:
-            #print("❌ GPT 응답 실패:", gpt_error)
             return JSONResponse(status_code=500, content={"error": "GPT 응답 실패"})
 
         # TTS로 변환
@@ -184,14 +168,13 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
             save_chat_log_db(
                 db=db,
                 diary_id=int(diary_id),
-                user_input=diary_content,  # 첫 질문엔 사용자 일기
+                user_input=diary_content,
                 response=question,
                 mode="F" 
             )
 
         except Exception as tts_error:
-            #print("❌ TTS 변환 실패:", tts_error)
-            return JSONResponse(status_code=500, content={"error": "TTS 변환 실패~"})
+            return JSONResponse(status_code=500, content={"error": "TTS 변환 실패"})
 
         return {
             "question": question,
@@ -199,7 +182,6 @@ async def generate_question(request: Request, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        #print("❌ 최상위 에러:", e)
         return JSONResponse(status_code=500, content={"error": "질문 생성 실패"})
 
 
@@ -214,6 +196,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
             audio_base64 = data.get("audio_base64")
             history = data.get("history")
             diary_id = data.get("diary_id")
+            
             if not audio_base64 or not diary_id or not history:
                 return JSONResponse(status_code=400, content={"error": "audio_base64, diary_id, history는 필수입니다."})
         except Exception as parse_err:
@@ -247,14 +230,12 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
             credentials = service_account.Credentials.from_service_account_info(key_dict)
 
             client = speech.SpeechClient(credentials=credentials)
-            #client = speech.SpeechClient()
             with open(flac_path, "rb") as audio_file:
                 content = audio_file.read()
 
             audio = speech.RecognitionAudio(content=content)
             config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
-                #sample_rate_hertz=16000,
                 language_code="ko-KR",
                 audio_channel_count=2
             )
@@ -270,7 +251,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
         # 6. 감정 모드 판단 및 GPT 호출
         try:
             prev_mode = history_data[-1].get("mode", "F") if history_data else "F"
-            mode = detect_mode(user_input, prev_mode)
+            mode = detect_mode(user_input)
 
             messages = build_messages(history_data, user_input, mode)
             response_text = get_gpt_response(messages)
@@ -295,7 +276,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
         except Exception as db_err:
             return JSONResponse(status_code=500, content={"error": f"대화 저장 실패: {str(db_err)}"})
 
-        # ✅ 성공 응답
+        # 성공 응답
         return {
             "input": user_input,
             "response": response_text,
@@ -308,18 +289,7 @@ async def upload_audio_base64(request: Request, db: Session = Depends(get_db)):
         return JSONResponse(status_code=500, content={"error": f"알 수 없는 서버 오류: {str(e)}"})
 
 
-
-
-
-# # 오디오 파일 반환
-# @router.get("/audio/{filename}")
-# async def get_audio(filename: str):
-#     path = os.path.join(AUDIO_DIR, filename)
-#     if os.path.exists(path):
-#         return FileResponse(path, media_type="audio/mpeg")
-#     return {"error": "파일이 존재하지 않습니다."}
-
-# 대화 기록 조회 (DB 기반)
+# 대화 기록 조회
 @router.get("/chat-history")
 async def get_chat_history(diary_id: int, db: Session = Depends(get_db)):
     logs = (
@@ -334,7 +304,6 @@ async def get_chat_history(diary_id: int, db: Session = Depends(get_db)):
             "user_input": log.user_input,
             "response": log.response,
             "mode": log.mode,
-            #"audio_url": log.audio_url,
             "created_at": log.created_at.isoformat()
         }
         for log in logs
