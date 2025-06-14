@@ -1,6 +1,6 @@
 # app/main.py
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.emotion import predict_emotion
@@ -33,15 +33,50 @@ class TextInput(BaseModel):
     text: str
     date: str
 
+@app.put("/diary/{diary_id}")
+def update_diary_emotion(
+    diary_id: int,
+    new_emotion: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    diary = db.query(model.Diary).filter(
+        model.Diary.id == diary_id,
+        model.Diary.user_id == user_id
+    ).first()
 
-# # DB 세션 연결 함수
-# def get_db():
-#     db = database.SessionLocal()
-#     try:
-#         yield db
-#     finally:
-#         db.close()
+    if not diary:
+        raise HTTPException(status_code=404, detail="Diary not found")
 
+    diary.emotion = new_emotion
+    db.commit()
+
+    return {
+        "message": "Emotion updated",
+        "id": diary.id,
+        "new_emotion": new_emotion
+    }
+
+@app.get("/diary/{diary_id}")
+def get_single_diary(
+    diary_id: int,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    diary = db.query(model.Diary).filter(
+        model.Diary.id == diary_id,
+        model.Diary.user_id == user_id
+    ).first()
+
+    if not diary:
+        raise HTTPException(status_code=404, detail="Diary not found")
+
+    return {
+        "id": diary.id,
+        "text": diary.text,
+        "emotion": diary.emotion,
+        "created_at": diary.created_at
+    }
 
 # 기존 감정 분석만 반환하는 API (기존 코드 유지!)
 @app.post("/analyze/emotion")
