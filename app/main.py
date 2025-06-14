@@ -9,7 +9,7 @@ from app.chatbot import router as chatbot_router
 from app.recommender import get_recommendations
 from app.utils import get_current_user
 from app.firebase_auth import verify_firebase_token, get_current_user_id
-from datetime import datetime
+from datetime import datetime, date
 from app.deps import get_db
 from dotenv import load_dotenv
 import os
@@ -46,21 +46,23 @@ class DiaryUpdateRequest(BaseModel):
     text: str
     emotion: str
 
-@app.put("/diary/{diary_id}")
-def update_diary(
-    diary_id: int,
+@app.put("/diary/by-date/{date}")
+def update_diary_by_date(
+    date: date,
     update: DiaryUpdateRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
+    # 사용자 + 날짜 기준으로 해당 일기 찾기
     diary = db.query(model.Diary).filter(
-        model.Diary.id == diary_id,
-        model.Diary.user_id == user_id
+        model.Diary.user_id == user_id,
+        model.Diary.date == date
     ).first()
 
     if not diary:
         raise HTTPException(status_code=404, detail="Diary not found")
 
+    # 내용과 감정 모두 업데이트
     diary.content = update.text
     diary.emotion = update.emotion
     db.commit()
@@ -68,19 +70,20 @@ def update_diary(
     return {
         "message": "Diary updated",
         "id": diary.id,
+        "date": diary.date,
         "content": diary.content,
         "emotion": diary.emotion
     }
 
-@app.get("/diary/{diary_id}")
-def get_single_diary(
-    diary_id: int,
+@app.get("/diary/by-date/{date}")
+def get_diary_by_date(
+    date: date,  #  문자열을 날짜로 파싱
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
     diary = db.query(model.Diary).filter(
-        model.Diary.id == diary_id,
-        model.Diary.user_id == user_id
+        model.Diary.user_id == user_id,
+        model.Diary.date == date  # 날짜 컬럼으로 조회
     ).first()
 
     if not diary:
@@ -88,12 +91,14 @@ def get_single_diary(
 
     return {
         "id": diary.id,
-        "text": diary.text,
+        "content": diary.content,
         "emotion": diary.emotion,
+        "confidence": diary.confidence,
+        "date": diary.date,
         "created_at": diary.created_at
     }
 
-# 기존 감정 분석만 반환하는 API (기존 코드 유지!)
+# 기존 감정 분석만 반환하는 API
 @app.post("/analyze/emotion")
 def analyze_emotion(input: TextInput):
     result = predict_emotion(input.text)
