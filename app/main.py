@@ -42,10 +42,14 @@ def get_diaries(
     return db.query(model.Diary).filter(model.Diary.user_id == user_id).all()
 
 
+class DiaryUpdateRequest(BaseModel):
+    text: str
+    emotion: str
+
 @app.put("/diary/{diary_id}")
-def update_diary_emotion(
+def update_diary(
     diary_id: int,
-    new_emotion: str = Body(..., embed=True),
+    update: DiaryUpdateRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -57,13 +61,15 @@ def update_diary_emotion(
     if not diary:
         raise HTTPException(status_code=404, detail="Diary not found")
 
-    diary.emotion = new_emotion
+    diary.content = update.text
+    diary.emotion = update.emotion
     db.commit()
 
     return {
-        "message": "Emotion updated",
+        "message": "Diary updated",
         "id": diary.id,
-        "new_emotion": new_emotion
+        "content": diary.content,
+        "emotion": diary.emotion
     }
 
 @app.get("/diary/{diary_id}")
