@@ -33,6 +33,15 @@ class TextInput(BaseModel):
     text: str
     date: str
 
+# 일기 목록 반환
+@app.get("/diary/list")
+def get_diaries(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    return db.query(model.Diary).filter(model.Diary.user_id == user_id).all()
+
+
 @app.put("/diary/{diary_id}")
 def update_diary_emotion(
     diary_id: int,
@@ -121,15 +130,6 @@ def analyze_and_save(
     except Exception as e:
         print("🔥 서버 오류:", e)
         raise HTTPException(status_code=500, detail="서버 내부 오류")
-
-
-# 일기 목록 반환
-@app.get("/diary/list")
-def get_diaries(
-    db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
-):
-    return db.query(model.Diary).filter(model.Diary.user_id == user_id).all()
 
 
 @app.get("/my-info")
