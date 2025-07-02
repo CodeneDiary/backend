@@ -181,3 +181,16 @@ def delete_diary(
     db.commit()
 
     return {"message": f"{diary_id}번 일기가 삭제되었습니다."}
+
+@app.get("/diary/search")
+def search_diaries(
+    keyword: str = Query(..., min_length=1, description="검색할 키워드"),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    diaries = db.query(model.Diary).filter(
+        model.Diary.user_id == user_id,
+        model.Diary.content.ilike(f"%{keyword}%")
+    ).all()
+
+    return diaries
