@@ -1,6 +1,6 @@
 # app/main.py
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Body
+from fastapi import FastAPI, Depends, HTTPException, Query, Body, Path
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.emotion import predict_emotion
@@ -162,3 +162,22 @@ def recommend_from_emotion(
 
     except Exception as e:
         return {"error": str(e)}
+
+@app.delete("/diary/{diary_id}")
+def delete_diary(
+    diary_id: int = Path(..., description="삭제할 일기의 ID"),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    diary = db.query(model.Diary).filter(
+        model.Diary.id == diary_id,
+        model.Diary.user_id == user_id  # 본인 글만 삭제 가능
+    ).first()
+
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+
+    db.delete(diary)
+    db.commit()
+
+    return {"message": f"{diary_id}번 일기가 삭제되었습니다."}
