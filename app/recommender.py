@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 import sqlite3
 import os
+from typing import List, Optional
 
 DB_PATH = os.path.join("app", "emotion.db")
 router = APIRouter()
@@ -11,27 +12,47 @@ def get_recommendations(content_type, emotion, db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    if content_type == "quotes":
+        select_fields = "title, url"
+    elif content_type in ["books", "music"]:
+        select_fields = "title, url, thumbnail_url"
+    elif content_type == "movies":
+        select_fields = "title, url, poster_url"
+    else:
+        return []
+
     if emotion:
         query = f"""
-            SELECT title, url
+            SELECT {select_fields}
             FROM {content_type}
             WHERE emotion_tags LIKE ?
             LIMIT 5;
-            """
+        """
         cursor.execute(query, (f"%{emotion}%",))
     else:
         query = f"""
-            SELECT title, url
+            SELECT {select_fields}
             FROM {content_type}
             ORDER BY RANDOM()
             LIMIT 5;
-            """
+        """
         cursor.execute(query)
 
     results = cursor.fetchall()
     conn.close()
 
-    return [{"title": row[0], "url": row[1]} for row in results]
+    # 결과 포맷 정리
+    content_list = []
+    for row in results:
+        content = {
+            "title": row[0],
+            "url": row[1]
+        }
+        if len(row) == 3:  # 썸네일 또는 포스터가 있을 경우
+            content["image"] = row[2]
+        content_list.append(content)
+
+    return content_list
 
 # 추천 API 엔드포인트
 @router.get("/recommend")
