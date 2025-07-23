@@ -12,6 +12,8 @@ from app.firebase_auth import verify_firebase_token, get_current_user_id
 from datetime import datetime, date
 from app.deps import get_db
 from dotenv import load_dotenv
+from typing import Optional, List
+from fastapi.responses import JSONResponse
 import os
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -147,7 +149,20 @@ def analyze_and_save(
 def my_info(user_email: str = Depends(verify_firebase_token)):
     return {"email": user_email}
 
-@app.post("/recommend/from-emotion")
+class Recommendation(BaseModel):
+    title: str
+    url: str
+    emotion_tags: str
+    image: Optional[str] = None
+
+class RecommendationResponse(BaseModel):
+    emotion: str
+    books: List[Recommendation]
+    movies: List[Recommendation]
+    music: List[Recommendation]
+    quotes: List[Recommendation]
+
+@app.post("/recommend/from-emotion", response_model=RecommendationResponse)
 def recommend_from_emotion(
     emotion: str = Query(..., description="기반 감정 (예: 행복, 슬픔 등)")
 ):
@@ -161,7 +176,7 @@ def recommend_from_emotion(
         }
 
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.delete("/diary/{diary_id}")
 def delete_diary(

@@ -13,21 +13,28 @@ def get_recommendations(content_type, emotion, db_path):
     cursor = conn.cursor()
 
     if content_type == "quotes":
-        select_fields = "title, url"
-    elif content_type in ["books", "music"]:
-        select_fields = "title, url, thumbnail_url"
+        select_fields = "title, url, emotion_tags"
+        image_index = None  # 이미지 없음
+    elif content_type == "books":
+        select_fields = "title, url, emotion_tags, thumbnail_url"
+        image_index = 3
+    elif content_type == "music":
+        select_fields = "title, url, emotion_tags, thumbnail_url"
+        image_index = 3
     elif content_type == "movies":
-        select_fields = "title, url, poster_url"
+        select_fields = "title, url, emotion_tags, poster_url"
+        image_index = 3
     else:
         return []
 
     if emotion:
         query = f"""
-            SELECT {select_fields}
-            FROM {content_type}
-            WHERE emotion_tags LIKE ?
-            LIMIT 5;
-        """
+                SELECT {select_fields}
+                FROM {content_type}
+                WHERE emotion_tags LIKE ?
+                ORDER BY id DESC
+                LIMIT 5;
+            """
         cursor.execute(query, (f"%{emotion}%",))
     else:
         query = f"""
@@ -46,10 +53,11 @@ def get_recommendations(content_type, emotion, db_path):
     for row in results:
         content = {
             "title": row[0],
-            "url": row[1]
+            "url": row[1],
+            "emotion_tags": row[2],
         }
-        if len(row) == 3:  # 썸네일 또는 포스터가 있을 경우
-            content["image"] = row[2]
+        if image_index is not None:
+            content["image"] = row[image_index]
         content_list.append(content)
 
     return content_list
