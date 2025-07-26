@@ -92,21 +92,37 @@ def synthesize_speech_base64(text: str, mode: str = "F") -> str:
         key_dict = json.loads(google_key_json)
         credentials = service_account.Credentials.from_service_account_info(key_dict)
         client = texttospeech.TextToSpeechClient(credentials=credentials)
-        synthesis_input = texttospeech.SynthesisInput(text=text)
 
-        if mode == "T":
-            voice = texttospeech.VoiceSelectionParams(language_code="ko-KR", ssml_gender=texttospeech.SsmlVoiceGender.FEMALE)
-            audio_config = texttospeech.AudioConfig(speaking_rate=1.0, pitch=-2.0, audio_encoding=texttospeech.AudioEncoding.MP3)
+        # SSML 변환
+        escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        if mode == "F":
+            ssml = f"<speak><prosody rate='medium' pitch='+2st'>{escaped_text}</prosody></speak>"
         else:
-            voice = texttospeech.VoiceSelectionParams(language_code="ko-KR", ssml_gender=texttospeech.SsmlVoiceGender.FEMALE)
-            audio_config = texttospeech.AudioConfig(speaking_rate=1.05, pitch=2.0, audio_encoding=texttospeech.AudioEncoding.MP3)
+            ssml = f"<speak><prosody rate='medium' pitch='-2st'>{escaped_text}</prosody></speak>"
 
-        response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+        synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
+
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="ko-KR",
+            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
+        )
+        audio_config = texttospeech.AudioConfig(
+            speaking_rate=1.0,
+            pitch=0.0,
+            audio_encoding=texttospeech.AudioEncoding.MP3
+        )
+
+        response = client.synthesize_speech(
+            input=synthesis_input,
+            voice=voice,
+            audio_config=audio_config
+        )
         return base64.b64encode(response.audio_content).decode("utf-8")
 
     except Exception as e:
         print("TTS 변환 오류:", e)
         raise RuntimeError(f"TTS 변환 실패: {str(e)}")
+
 
 
 # 대화 내역을 ConversationLog 테이블에 저장
